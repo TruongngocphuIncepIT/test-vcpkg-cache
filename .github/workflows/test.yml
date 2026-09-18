@@ -1,19 +1,59 @@
-name: Test
+name: Test vcpkg cache
 
 on:
   push:
     branches:
-      - development
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test
+      - name: Set up vcpkg
         run: |
-          echo "GitHub Actions is working!"
-          echo "Testing vcpkg cache repository"
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMake/**') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Install vcpkg dependency
+        run: |
+          vcpkg install --triplet=x64-linux
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          cmake --build build --parallel
+          ./build/main
+
+      - name: Explain cache result
+        run: |
+          if [[ "${{ steps.vcpkg-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "Exact cache hit: no new cache is created for this run."
+          else
+            echo "Cache miss or partial hit: vcpkg filled the missing packages."
+            echo "The cache action will save this key after the job succeeds."
+          fi
