@@ -1,0 +1,5 @@
+{
+  "name": "test-vcpkg-cache",
+  "version-string": "1.0.0",
+  "dependencies": []
+}
